@@ -1,2 +1,2 @@
-# elearning
-Repository for sharing my elearning projects
+# eLearning
+Repository for sharing my eLearning projects
