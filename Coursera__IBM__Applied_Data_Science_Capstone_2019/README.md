@@ -34,11 +34,13 @@ Find the Best Neighborhoods of Munich.
   Jupyter Notebook file
 
 - **Capstone-Project_The-Battle-of-the-Neighborhoods_report.pdf**
-  [[pdf](https://github.com/CastraRegina/eLearning/blob/master/Coursera__IBM__Applied_Data_Science_Capstone_2019/Capstone-Project_The-Battle-of-the-Neighborhoods_report.pdf)]\
+  [[pdf view github](https://github.com/CastraRegina/eLearning/blob/master/Coursera__IBM__Applied_Data_Science_Capstone_2019/Capstone-Project_The-Battle-of-the-Neighborhoods_report.pdf)]
+  [[pdf file](https://github.com/CastraRegina/eLearning/raw/master/Coursera__IBM__Applied_Data_Science_Capstone_2019/Capstone-Project_The-Battle-of-the-Neighborhoods_report.pdf)]\
   Report - pdf file
 
 - **Capstone-Project_The-Battle-of-the-Neighborhoods_presentation.pdf**
-  [[pdf](https://github.com/CastraRegina/eLearning/blob/master/Coursera__IBM__Applied_Data_Science_Capstone_2019/Capstone-Project_The-Battle-of-the-Neighborhoods_presentation.pdf)]\
+  [[pdf view github](https://github.com/CastraRegina/eLearning/blob/master/Coursera__IBM__Applied_Data_Science_Capstone_2019/Capstone-Project_The-Battle-of-the-Neighborhoods_presentation.pdf)]
+  [[pdf file](https://github.com/CastraRegina/eLearning/raw/master/Coursera__IBM__Applied_Data_Science_Capstone_2019/Capstone-Project_The-Battle-of-the-Neighborhoods_presentation.pdf)]\
   Presentation slides - pdf file
 
 
