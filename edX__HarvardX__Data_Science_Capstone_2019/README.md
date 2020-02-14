@@ -13,7 +13,7 @@ This course is part of the overall course
 
 
 
-### Assignment 1: MovieLens Project Report - Predicting user ratings from MovieLens data set 
+### Assignment 1: MovieLens Project - Predicting user ratings from MovieLens data set 
 
 Recommendation systems use ratings that users have given items to make specific recommendations to users.
 In this project a movie recommendation system will be created, using the features in the MovieLens data set to
@@ -30,22 +30,22 @@ Two of the presented models fulfill the required target value.
 The final model reaches a **RMSE** value of approximately **0.8648**.
 
 
-- **TODO**
-  [[code](code-link)]
-  xyx file    
+- **movielens-project-r-script.R**
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-r-script.R)]
+  R file    
 
-- **TODO**
-  [[code](code-link)]
-  xyx file    
+- **movielens-project-r-script.Rmd**
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-report.Rmd)]
+  Rmd - R Markdown file    
 
-- **TODO**
-  [[pdf view github](link-pdf)]
-  [[pdf file](link-pdf)]\
-  TODO - pdf file
+- **movielens-project-report.pdf**
+  [[pdf view github](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-report.pdf)]
+  [[pdf file](https://github.com/CastraRegina/eLearning/raw/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-report.pdf)]\
+  Report - pdf file created with *knit* based on the .Rmd file
 
 
 
-### Assignment 2: Choose Your Own Project Report - Time series analysis using the example of weather data 
+### Assignment 2: Choose Your Own Project - Time series analysis using the example of weather data 
 
 The programming language **R** is considered to be particularly suitable for the analysis of time series, as there are several
 packages and methods available for carrying out predictions. For this project data from a weather station in Jena will be
@@ -60,17 +60,18 @@ A neural network method as well as models taking advantage of the seasonality of
 the temperatures.
 
 
-- **TODO**
-  [[code](code-link)]
-  xyx file    
+- **CYO-project-r-script.R**
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-r-script.R)]
+  R file    
 
-- **TODO**
-  [[code](code-link)]
-  xyx file    
+- **CYO-project-r-script.Rmd**
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-report.Rmd)]
+  Rmd - R Markdown file    
 
-- **TODO**
-  [[pdf view github](link-pdf)]
-  [[pdf file](link-pdf)]\
-  TODO - pdf file
+- **CYO-project-report.pdf**
+  [[pdf view github](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-report.pdf)]
+  [[pdf file](https://github.com/CastraRegina/eLearning/raw/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-report.pdf)]\
+  Report - pdf file created with *knit* based on the .Rmd file
+
 
 
