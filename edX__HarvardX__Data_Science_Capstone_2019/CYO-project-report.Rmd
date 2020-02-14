@@ -1,0 +1,1378 @@
+---
+title: "HarvardX-PH125.9x: Choose Your Own Project Report"
+subtitle: "Time series analysis using the example of weather data"
+author: "Regina Castra"
+date: "2019-06-07"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    latex_engine: xelatex
+documentclass: article
+classoption: a4paper
+papersize: a4
+fontsize: 11pt
+mainfont: FreeSans   <!-- on linux machines FreeSans is an equivalent to Arial -->
+urlcolor: blue
+---
+
+```{r LoadLibraries, include=FALSE, eval=TRUE}
+### Load libraries and install them if not available yet
+# reference: https://cran.r-project.org/web/views/TimeSeries.html
+if(!require(colorspace)) install.packages("colorspace")
+if(!require(tidyverse))  install.packages("tidyverse")
+if(!require(readr))      install.packages("readr")
+if(!require(caret))      install.packages("caret")
+if(!require(knitr))      install.packages("knitr")
+if(!require(kableExtra)) install.packages("kableExtra")
+if(!require(munsell))    install.packages("munsell")
+if(!require(scales))     install.packages("scales")
+if(!require(ggplot2))    install.packages("ggplot2")
+if(!require(reshape2))   install.packages("reshape2")
+if(!require(latex2exp))  install.packages("latex2exp")
+if(!require(xts))        install.packages("xts")
+if(!require(corrplot))   install.packages("corrplot")
+if(!require(ggrepel))    install.packages("ggrepel")
+if(!require(grid))       install.packages("grid")
+if(!require(forecast))   install.packages("forecast")
+if(!require(lubridate))  install.packages("lubridate")
+if(!require(quadprog))   install.packages("quadprog")
+if(!require(tseries))    install.packages("tseries")
+if(!require(zoo))        install.packages("zoo")
+if(!require(xts))        install.packages("xts")
+if(!require(ggfortify))  install.packages("ggfortify")
+if(!require(forecast))   install.packages("forecast")
+if(!require(nortest))    install.packages("nortest")
+
+
+# define consistent ggplot-theme for all plots:
+myggtheme <- theme_bw() +
+  theme(plot.title   = element_text(size=9, face='bold'),
+        axis.title.x = element_text(size=9, face='plain'),
+        axis.title.y = element_text(size=9, face='plain'),
+        axis.text.x  = element_text(size=8, face='plain'),
+        axis.text.y  = element_text(size=8, face='plain'),
+        legend.title = element_text(size=8, face='bold'),
+        legend.text  = element_text(size=8, face='plain'))
+colorsMM<- c(Mean="darkgreen", Median="red")
+
+
+# define a standard function to create a ggplot of a histogram.
+#   input: dataframe = a tibble of data, xData = data for histogram
+myhistogram <- function(dataframe, xData, binwidth = 1, title = "", xLabel = "")
+{
+  median   <- median(xData)
+  mean     <- mean(  xData)
+  sd       <- sd(    xData)
+  annotationText <- paste("Mean = "    , round(mean  , 3), "\n", 
+                          "Median = "  , round(median, 3), "\n", 
+                          "sigma = "   , round(sd    , 3), "\n",
+                          "binwidth = ", binwidth, "\n",
+                          "n = ", length(xData), sep="")
+  ggplot(dataframe, aes(x = xData)) + 
+    geom_histogram(binwidth = binwidth, color="darkblue", fill="lightblue", alpha=0.5) +
+    geom_vline(aes(xintercept=median, color="Median"), size=1.5) +
+    geom_vline(aes(xintercept=mean  , color="Mean"), size=1.5) +
+    scale_colour_manual(name="Colors",values=colorsMM) +
+    ggtitle(title) + 
+    xlab(xLabel) +
+    myggtheme +
+    theme(legend.position = c(0.9, 0.8)) +  #x=0.85, y=0.845
+    annotation_custom(grobTree(textGrob(annotationText, x=0.05, y=0.8, just="left", gp = gpar(fontsize=8) ))) + #y=0.85
+    stat_function(fun = function(x) dnorm(x, mean = mean, sd = sd) * length(xData) * binwidth, color = "black", size = 1)
+}
+
+set.seed(123)
+
+```
+
+
+<!-- ------------------------------------------------------------------------------------------------------------------------------ -->
+<!-- Instructions: (according to "Project Overview: Choose Your Own!")-->
+<!-- For this project, you will be applying machine learning techniques that go beyond standard linear regression. -->
+<!-- You will have the opportunity to use a publicly available dataset to solve the problem of your choice. -->
+<!--   ... -->
+<!-- The ability to clearly communicate the process and insights gained from an analysis is an important skill for data scientists. -->
+<!--   ... -->
+<!-- Although the exact format is up to you, the report should include the following at a minimum: -->
+<!--   + an introduction/overview/executive summary section that describes the dataset and -->
+<!--       summarizes the goal of the project and key steps that were performed; -->
+<!--   + a methods/analysis section that explains the process and techniques used, such as data cleaning, data exploration and
+<!--       visualization, any insights gained, and your modeling approach; -->
+<!--   + a results section; and -->
+<!--   + a conclusion section. -->
+<!-- ------------------------------------------------------------------------------------------------------------------------------ -->
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+# Introductory Summary
+The programming language **R** is considered particularly suitable for the analysis of time series,
+as there are several packages and methods available to perform forecasts. 
+For this project, the data of a weather station in Jena will be used to provide training and test dataset.
+
+The goal is to train a machine learning algorithm using the daily mean temperatures of four years to predict the temperatures of the fifth year.
+The quality of fitting the signal of the training dataset as well as the forecast's quality of the fifth year is quantified by a selection of accuracy measurements like RMSE, MAE, MASE and MAPE.
+
+Starting with a base model which uses just the average as a constant forecast value, several different models are used.
+A neural net method as well as models taking advantage of the seasonality of the data perform quite well in forecasting the temperatures.    
+
+
+
+\pagebreak
+
+# Analysis
+
+## Data Source and Description
+
+The used data file
+[jena_climate_2009_2016.csv.zip](https://s3.amazonaws.com/keras-datasets/jena_climate_2009_2016.csv.zip)
+is described on the
+[website hosted at kaggle](https://www.kaggle.com/pankrzysiu/weather-archive-jena)
+and can be downloaded from the
+[Amazon Simple Storage Service (Amazon S3)](https://s3.amazonaws.com/keras-datasets/jena_climate_2009_2016.csv.zip)
+without the need of any login credentials.
+According to the
+[website](https://www.kaggle.com/pankrzysiu/weather-archive-jena),
+there were 14 different quantities (such as air temperature, atmospheric pressure, humidity, wind direction, and so on)
+recorded every 10 minutes, over several years.
+This dataset is limited to the years from 2009 to 2016. 
+
+
+
+
+```{r DownloadData, include=FALSE, eval=TRUE}
+# Download original file from https://s3.amazonaws.com  (no login credentials needed - very much appreciated for this project) 
+#   https://s3.amazonaws.com/keras-datasets/jena_climate_2009_2016.csv.zip
+dl <- tempfile()
+download.file("https://s3.amazonaws.com/keras-datasets/jena_climate_2009_2016.csv.zip", dl)
+```
+
+The zip file provides only one csv-file:
+```{r ZipFileContent, echo=FALSE}
+unzip(dl, list=T) %>% knitr::kable() %>% 
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center") %>% 
+  row_spec(0, bold = TRUE)
+```
+
+
+
+
+## Data Structure
+```{r CSVFileContentRaw, include=FALSE, eval=TRUE}
+jena_climate_2009_2016_raw <- read_csv(unzip(dl, "jena_climate_2009_2016.csv"))
+```
+
+File *jena_climate_2009_2016.csv* has **`r ncol(jena_climate_2009_2016_raw)` attributes** stored in the columns 
+and consist of **`r nrow(jena_climate_2009_2016_raw)` observations** in the rows.
+The data seems to be in tidy format:
+
+* Each variable in the dataset is placed in its own column
+* Each observation is placed in its own row
+* Each value is placed in its own cell
+
+The 15 attributes have the following names, types and short descriptions (taken from the
+[website hosted at kaggle](https://www.kaggle.com/pankrzysiu/weather-archive-jena)):
+
+```{r DataAttributeTypes, echo=FALSE}
+mydata.attributes <- sapply(jena_climate_2009_2016_raw, typeof)
+mydata.attributes <- cbind(names(mydata.attributes),
+                         mydata.attributes,
+                         c("date & time",
+                           "atmospheric pressure",
+                           "temperature",
+                           "potential temperature",
+                           "dew point temperature",
+                           "relative humidity",
+                           "saturation water vapor pressure",
+                           "actual water vapor pressure",
+                           "water vapor pressure deficit",
+                           "specific humidity",
+                           "water vapor concentration",
+                           "air density",
+                           "wind velocity",
+                           "maximum wind velocity",
+                           "wind direction"))
+mydata.attributes <- as_tibble(mydata.attributes, .name_repair = "minimal")
+names(mydata.attributes) <- c("Attribute", "Type", "Description")
+kable(mydata.attributes) %>% 
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center") %>% 
+  row_spec(0, bold = TRUE)
+```
+
+\pagebreak
+
+To get a first impression of the data, the first 4 observations are shown in the following table.
+Please note that the table has been transposed for better readability:
+
+```{r dataFirst4, echo=FALSE}
+mydata.first4 <- head(jena_climate_2009_2016_raw, n = 4)
+mydata.first4 <- as_tibble(cbind(names(mydata.first4), t(mydata.first4)), .name_repair = "minimal")
+names(mydata.first4) <- c("Attribute", "Observation 1", "Observation 2", "Observation 3", "Observation 4")
+kable(mydata.first4) %>% 
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center", font_size = 9.8) %>% 
+  row_spec(0, bold = TRUE)
+```
+
+
+
+
+## Data Check and Transformation
+The dataset does not contain any *missing values (NA)*. The number of *NA*-entries for each attribute in the dataset is: 
+```{r dataCheckNA, echo=FALSE}
+mydata.missingValues <- t(colSums(is.na(jena_climate_2009_2016_raw)))
+row.names(mydata.missingValues) <- c("Number of NA")
+kable(mydata.missingValues) %>%
+  row_spec(0, angle = 90) %>% 
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center", font_size = 9.8)
+```
+
+The statistical properties give a first impression of the data quality:
+```{r dataStatistics, echo=FALSE}
+kable(t(summary(jena_climate_2009_2016_raw))) %>% 
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center", font_size = 9.5) %>% 
+  row_spec(0, font_size = 0.1) %>% 
+  add_header_above(c("Attribute" = 1, "Statistical Properties" = 6), bold = TRUE)
+```
+
+Comparing the "*Min.*" and "*Max.*" values with the quantiles "*1st Qu.*" and "*3rd Qu.*" lead to the conclusion that the values of the attributes "*wv (m/s)*" and "*max. wv (m/s)*" show outliers.
+
+For the other attributes, 
+[boxplots](https://www.r-bloggers.com/exploring-ggplot2-boxplots-defining-limits-and-adjusting-style/)
+of their standardized values will give a graphical view of their distribution:  
+
+```{r dataBoxplots, echo=FALSE, out.width="100%", fig.show="hold"}
+mydata.standardized <- melt(as.data.frame(scale(select(jena_climate_2009_2016_raw, -c(`Date Time`, `max. wv (m/s)`, `wv (m/s)`)))),
+                          id.vars = c(), variable.name = "Attribute", value.name = "StandardizedValue")
+ggplot(mydata.standardized, aes(x = Attribute, y = StandardizedValue)) + geom_boxplot() +
+  stat_boxplot(geom = "errorbar") + coord_flip() +
+  ylab(TeX("$Standardized\\,Value\\;X' = \\frac{X - \\mu}{\\sigma}$")) +
+  myggtheme
+```
+Attributes _"rho (g/m\*\*3)"_ and "_p (mbar)_" show separated *outliers*. The remaining attributes seem to have plausible values.
+
+
+The first column "*Date Time*" is of type *character* and needs to be converted into a *POSIXct* "date time" column.
+This is done by using the function *strptime()* with the format "%d.%m.%Y %H:%M:%S".
+
+For analysis of time series it is mandatory to use data of constant lags.
+According to the data description there should be an observation every 10 minutes.
+A check confirms that the data has a periodicity of 10 minutes:
+```{r checkPeriodicity, echo=FALSE}
+# convert first column "Date Time" into a POSIXct date time format:
+jena_climate_2009_2016 <- jena_climate_2009_2016_raw
+jena_climate_2009_2016$`Date Time POSIXct` <- as.POSIXct(strptime(jena_climate_2009_2016$`Date Time`, format = "%d.%m.%Y %H:%M:%S", tz="UTC"))
+# check periodicity of time series:
+periodicity(jena_climate_2009_2016$`Date Time POSIXct`)
+```
+
+But there are also some observations missing (positive lag values > 10min) and others seem to be redundant (negative lag values).
+For easier handling an unique *ID* is introduced for each observation.
+The *ID* is equivalent to the line number in the *raw*-data.
+
+```{r dataRawLags, echo=FALSE}
+# add attribute ID and lag:
+jena_climate_2009_2016 <- tibble::rowid_to_column(jena_climate_2009_2016, "ID")
+jena_climate_2009_2016 <- jena_climate_2009_2016 %>% mutate(IDname = paste("ID", ID))
+lags <- as.numeric(diff(jena_climate_2009_2016$`Date Time POSIXct`, lag = 1))
+jena_climate_2009_2016$`lag (min)` <- c(0,lags)
+
+# show the lags != 10min:
+jena_climate_2009_2016 %>% select(-c(`Date Time POSIXct`)) %>% filter(`lag (min)` < 10 | 10 < `lag (min)`) %>%
+  tail(-1) %>% select(ID, `Date Time`, `lag (min)`) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+# --> there are some observations missing (positive lag values) and others seem to be redundant (negative lag values)
+
+# drop redundant values (78767 <= ID <= 78767+143) (redundant-range1)
+jena_climate_2009_2016_clean <- subset(jena_climate_2009_2016, ID < 78767 | 78767+143 < ID)
+
+# drop redundant values (274566 <= ID <= 274566+182) (redundant-range2)
+jena_climate_2009_2016_clean <- subset(jena_climate_2009_2016_clean, ID < 274566 | 274566+182 < ID)
+
+# calculate the lags again for the "clean" data:
+lags <- as.numeric(diff(jena_climate_2009_2016_clean$`Date Time POSIXct`, lag = 1))
+jena_climate_2009_2016_clean$`lag (min)` <- c(0,lags)
+```
+
+The first range of redundant values is shown in the following figure.
+The resulting "cleaned" data is plotted as grey line.
+The green line shows the observations up to *ID_78766* at time stamp *2010-07-02 00:00:00*.
+The next observation *ID_78767* "jumps back" to time stamp *2010-07-01 00:10:00*.
+This observation and subsequent ones are plotted with a blue line.
+
+```{r showRedundantRange1, fig.align='center', echo=FALSE}
+# for redundant-range1: visualize the drop-procedure and the resulting data w/o redundancy:
+ggplot() +
+  geom_line(data = subset(jena_climate_2009_2016_clean, 78767-300 < ID & ID < 78767+300),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "grey" , size=3.0) +
+  geom_line(data = subset(jena_climate_2009_2016      , 78767-300 < ID & ID <= 78767    ),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "green", size=1.3) +
+  geom_line(data = subset(jena_climate_2009_2016      , 78767     <= ID & ID < 78767+300),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "blue" , size=0.5) +
+  xlab("Date Time") + ylab("T (degC)") +
+  scale_x_datetime(labels = date_format("%Y-%m-%d\n%H:%M:%S", tz = "UTC")) +
+  coord_cartesian(xlim = c(subset(jena_climate_2009_2016_clean,  ID == 78767-160) %>% select(`Date Time POSIXct`) %>% .[[1]],
+                           subset(jena_climate_2009_2016_clean,  ID == 78767+160) %>% select(`Date Time POSIXct`) %>% .[[1]]),
+                  ylim = c(subset(jena_climate_2009_2016,  78767-144 < ID & ID < 78767) %>% select(`T (degC)`) %>% min(),
+                           subset(jena_climate_2009_2016,  78767-144 < ID & ID < 78767) %>% select(`T (degC)`) %>% max())) +
+  geom_point(data = subset(jena_climate_2009_2016, ID %in% c(78767-144, 78767, 78766, 78767+143)),
+             aes(x = `Date Time POSIXct`, y = `T (degC)`), shape = 21, size = 6, stroke = 1) +
+  geom_label_repel(data = subset(jena_climate_2009_2016, ID %in% c(78767-144, 78767, 78766, 78767+143)),
+                   aes(x = `Date Time POSIXct`, y = `T (degC)`, label = IDname),
+                   box.padding = unit(1.2, 'lines'),
+                   point.padding = unit(0.9, 'lines') ) +
+  myggtheme 
+```
+
+The figure shows that the values are truely redundant, i.e. at each time stamp the green and the blue lines show the same value.
+Same is true for the second range of redundant values:
+
+```{r showRedundantRange2, fig.align='center', echo=FALSE}
+# for redundant-range2: visualize the drop-procedure and the resulting data w/o redundancy:
+ggplot() +
+  geom_line(data = subset(jena_climate_2009_2016_clean, 274566-300 < ID & ID < 274566+300),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "grey" , size=3.0) +
+  geom_line(data = subset(jena_climate_2009_2016      , 274566-300 < ID & ID <= 274566    ),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "green", size=1.3) +
+  geom_line(data = subset(jena_climate_2009_2016      , 274566     <= ID & ID < 274566+300),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "blue" , size=0.5) +
+  xlab("Date Time") + ylab("T (degC)") +
+  scale_x_datetime(labels = date_format("%Y-%m-%d\n%H:%M:%S", tz = "UTC")) +
+  coord_cartesian(xlim = c(subset(jena_climate_2009_2016_clean,  ID == 274566-190) %>% select(`Date Time POSIXct`) %>% .[[1]],
+                           subset(jena_climate_2009_2016_clean,  ID == 274566+190) %>% select(`Date Time POSIXct`) %>% .[[1]]),
+                  ylim = c(subset(jena_climate_2009_2016,  274566-183 < ID & ID < 274566) %>% select(`T (degC)`) %>% min(),
+                           subset(jena_climate_2009_2016,  274566-183 < ID & ID < 274566) %>% select(`T (degC)`) %>% max())) +
+  geom_point(data = subset(jena_climate_2009_2016, ID %in% c(274566-183, 274566, 274565, 274566+182)),
+             aes(x = `Date Time POSIXct`, y = `T (degC)`), shape = 21, size = 6, stroke = 1) +
+  geom_label_repel(data = subset(jena_climate_2009_2016, ID %in% c(274566-183, 274566, 274565, 274566+182)),
+                   aes(x = `Date Time POSIXct`, y = `T (degC)`, label = IDname),
+                   box.padding = unit(1.4, 'lines'),
+                   point.padding = unit(0.9, 'lines') ) +
+  myggtheme
+```
+
+After dropping the redundant values, the "cleaned" data looks at its joints as follows: 
+
+```{r dataCleanedJoints, echo=FALSE}
+# print data w/o redundant-range1:
+subset(jena_climate_2009_2016_clean,  78767-3 < ID & ID <  78767+146) %>% select(ID, `Date Time`, `lag (min)`) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# print data w/o redundant-range2:
+subset(jena_climate_2009_2016_clean, 274566-3 < ID & ID < 274566+185) %>% select(ID, `Date Time`, `lag (min)`) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+```
+
+The negative lags have been removed successfully from the data, but positive lags still remain:
+
+```{r dataCleanedLags, echo=FALSE}
+# show again the lags != 10min for the data without redundancy:
+jena_climate_2009_2016_clean %>% select(-c(`Date Time POSIXct`)) %>% filter(`lag (min)` < 10 | 10 < `lag (min)`) %>%
+  tail(-1) %>% select(ID, `Date Time`, `lag (min)`) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+```
+
+These gaps usually need to be filled, as most modeling techniques require regular time series, i.e. they need a specific constant interval between observations.
+The data will be aggregated using a time window of one hour, here by calculating a mean value for each hour.
+Using this approach, the three gaps which are smaller than 60mins can be "closed".
+Unfortunately two gaps over several hours still persist: 
+
+```{r dataCleanedLags1h, echo=FALSE}
+# aggregate the hourly mean:
+jena_climate_2009_2016_aggHourly <- jena_climate_2009_2016_clean %>% 
+  select(-c("ID", `Date Time`, "IDname", `lag (min)`)) %>% 
+  mutate(`hour` = as.POSIXct(strptime(format(`Date Time POSIXct`, format = "%d.%m.%Y %H"), format = "%d.%m.%Y %H", tz="UTC"))) %>% 
+  aggregate(list(`Date Time hour` = .$`hour`), mean) %>%
+  mutate(`Date Time` = format(`Date Time hour`, format = "%d.%m.%Y %H:%M:%S")) %>% 
+  select(-c(`Date Time POSIXct`, "hour")) %>% 
+  mutate(`lag (h)` = c(0,as.numeric(diff(`Date Time hour`, lag = 1)))) %>% 
+  tibble::rowid_to_column("IDh")
+# show the lags != 1h:
+jena_climate_2009_2016_aggHourly %>% select(-c(`Date Time hour`)) %>% tail(-1) %>% filter(`lag (h)` < 1 | 1 < `lag (h)`) %>%
+  select(IDh, `Date Time`, `lag (h)`) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+```
+
+The small gaps of 20 and 30 minutes disappeared.
+The following figure gives an impression, how this was accomplished.
+The raw-data (black line) is used to create a mean value for each hour (blue line).
+There are two observations missing between *ID_40378* and *ID_40379* (grey band).
+By averaging over 1h intervalls the gap is automatically "closed".
+Remark: Attribute *IDh* is introduced which provides an unique integer for each hourly observation.
+
+```{r aggregateCloseGap, fig.align='center', echo=FALSE}
+# plot raw- and aggregated-data at the place were a lag=30min was detected:
+ggplot() +
+  geom_line(data = subset(jena_climate_2009_2016_clean, 40379-1 <= ID & ID <= 40379),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "grey" , size=5) +
+  geom_line(data = subset(jena_climate_2009_2016_clean, round(40379-0.2*24*6) < ID & ID <= 40379-1),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "black" , size=1) +
+  geom_line(data = subset(jena_climate_2009_2016_clean, 40379 <= ID & ID < round(40379+0.2*24*6)),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "black" , size=1) +
+  geom_point(data = subset(jena_climate_2009_2016_clean, round(40379-0.2*24*6) < ID & ID < round(40379+0.2*24*6)),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), shape = 21, color = "black" , fill = "white" , size=2.5) +
+  xlab("Date Time") + ylab("T (degC)") +
+  scale_x_datetime(labels = date_format("%Y-%m-%d\n%H:%M:%S", tz = "UTC")) +
+  coord_cartesian(xlim = c(subset(jena_climate_2009_2016_clean,  ID == round(40379-0.1*24*6)) %>% select(`Date Time POSIXct`) %>% .[[1]],
+                           subset(jena_climate_2009_2016_clean,  ID == round(40379+0.1*24*6)) %>% select(`Date Time POSIXct`) %>% .[[1]]),
+                  ylim = c(subset(jena_climate_2009_2016, round(40379-0.1*24*6) < ID & ID < round(40379+0.1*24*6)) %>% select(`T (degC)`) %>% min(),
+                           subset(jena_climate_2009_2016, round(40379-0.1*24*6) < ID & ID < round(40379+0.1*24*6)) %>% select(`T (degC)`) %>% max())) +
+  geom_step(data = jena_climate_2009_2016_aggHourly,
+            aes(x = `Date Time hour`, y = `T (degC)`), color = "blue", alpha = 0.6, size=1) +
+  geom_point(data = subset(jena_climate_2009_2016_clean, ID %in% c(40379-1, 40379)),
+             aes(x = `Date Time POSIXct`, y = `T (degC)`), shape = 21, size = 6, stroke = 1) +
+  geom_label_repel(data = subset(jena_climate_2009_2016, ID %in% c(40379-1, 40379)),
+                   aes(x = `Date Time POSIXct`, y = `T (degC)`, label = IDname),
+                   box.padding = unit(1.1, 'lines'),
+                   point.padding = unit(0.9, 'lines') ) +
+  myggtheme
+```
+
+Following plot illustrates the aggregation approach and shows how well the 1h-average follows the original data.
+It can be thought of as a noise-reduction, i.e. higher frequencies are damped.
+
+```{r aggregateFollowsRaw, fig.align='center', echo=FALSE, fig.height=4.5, out.width="100%", fig.show="hold"}
+# plot raw- and aggregated-data for over ca. 3 days:
+ggplot() +
+  geom_line(data = subset(jena_climate_2009_2016_clean, round(40379-3*24*6) < ID & ID < round(40379+3*24*6)),
+            aes(x = `Date Time POSIXct`, y = `T (degC)`), color = "black" , size=0.5) +
+  xlab("Date Time") + ylab("T (degC)") +
+  scale_x_datetime(labels = date_format("%Y-%m-%d\n%H:%M:%S", tz = "UTC")) +
+  coord_cartesian(xlim = c(subset(jena_climate_2009_2016_clean,  ID == round(40379-1.5*24*6)) %>% select(`Date Time POSIXct`) %>% .[[1]],
+                           subset(jena_climate_2009_2016_clean,  ID == round(40379+1.6*24*6)) %>% select(`Date Time POSIXct`) %>% .[[1]]),
+                  ylim = c(subset(jena_climate_2009_2016, round(40379-1.5*24*6) < ID & ID < round(40379+1.6*24*6)) %>% select(`T (degC)`) %>% min(),
+                           subset(jena_climate_2009_2016, round(40379-1.5*24*6) < ID & ID < round(40379+1.6*24*6)) %>% select(`T (degC)`) %>% max())) +
+  geom_step(data = jena_climate_2009_2016_aggHourly,
+            aes(x = `Date Time hour`, y = `T (degC)`), color = "blue", alpha = 0.6, size=1) +
+  myggtheme 
+```
+
+The resulting data used in the following chapters starts at "01.01.2009_00:00:00" and will be cut off at "24.09.2014_00:00:00".
+
+```{r dataCutOff_2009_2014, echo=FALSE}
+# cut the data off at 24.09.2014 00:00:00 (inclusive)
+jena_climate_2009_2014h <- jena_climate_2009_2016_aggHourly %>%
+  subset(`Date Time hour` < as.POSIXct("2014-09-24 00:00:01", tz = "UTC")) %>% 
+  select(-c(`lag (h)`))
+
+# clean up:
+rm(jena_climate_2009_2016, jena_climate_2009_2016_clean, jena_climate_2009_2016_raw,
+   dl, lags, mydata.first4, mydata.missingValues, mydata.standardized,
+   jena_climate_2009_2016_aggHourly, mydata.attributes)
+```
+
+
+
+
+## Data Analysis
+The hourly data is clean for the time period "01.01.2009_00:00:00" to "24.09.2014_00:00:00".
+In the following the standard pre-processing and analysis for regular time series will be performed
+mainly on the attribute "*T (degC)*", i.e. the focus will be on univariate regular time series modelling.
+
+During the first investigations it became obvious that working on hourly data requires a lot of computing resources.
+Therefore an aggregation is performed again to obtain daily data, i.e. for the given time period using the hourly data,
+the mean temperature "*T (degC)*" for each day is calculated.
+
+```{r aggregateDataDailyMonthly, include=FALSE}
+# reduce the clean data to the time range (01.01.2009_00:00:00-31.01.2013_23:00:00) to obtain a dataset with frequency of 365 days (whole year)
+jena_climate_2009_2013h <- jena_climate_2009_2014h %>% subset(`Date Time hour` < as.POSIXct("2014-01-01 00:00:00", tz = "UTC"))
+head(jena_climate_2009_2013h)
+tail(jena_climate_2009_2013h)  
+
+# it turned out during the investigations that the hourly data requires quite a lot of computing resources...
+# therefore another aggregation for daily mean data and monthly mean data (based on hourly data) is performed:
+# aggregate the daily mean:
+jena_climate_2009_2013d <- jena_climate_2009_2013h %>% 
+  select(-c("IDh", `Date Time`)) %>% 
+  mutate(`day` = as.POSIXct(strptime(format(`Date Time hour`, format = "%d.%m.%Y"), format = "%d.%m.%Y", tz="UTC"))) %>% 
+  aggregate(list(`Date Time day` = .$`day`), mean) %>%
+  mutate(`Date Time` = format(`Date Time day`, format = "%d.%m.%Y %H:%M:%S")) %>% 
+  select(-c(`Date Time hour`, "day")) %>% 
+  tibble::rowid_to_column("IDd")
+jena_climate_2009_2013d
+head(jena_climate_2009_2013d)
+tail(jena_climate_2009_2013d)
+summary(jena_climate_2009_2013d)
+
+# aggregate the monthly mean:
+jena_climate_2009_2013m <- jena_climate_2009_2013h %>% 
+  select(-c("IDh", `Date Time`)) %>% 
+  mutate(`month` = as.POSIXct(strptime(paste("01.",format(`Date Time hour`, format = "%m.%Y")), format = "%d.%m.%Y", tz="UTC"))) %>% 
+  aggregate(list(`Date Time month` = .$`month`), mean) %>%
+  mutate(`Date Time` = format(`Date Time month`, format = "%d.%m.%Y %H:%M:%S")) %>% 
+  select(-c(`Date Time hour`, "month")) %>% 
+  tibble::rowid_to_column("IDm")
+jena_climate_2009_2013m
+head(jena_climate_2009_2013m)
+tail(jena_climate_2009_2013m)
+summary(jena_climate_2009_2013m)
+```
+
+Furthermore the time period of the investigated data is reduced to five years (01.01.2009_00:00-31.01.2013_23:00)
+to obtain a dataset with frequency of 365 days (whole year).
+For the hourly, daily and monthly aggregated data the histograms are presented: 
+
+```{r histogramHDM, fig.align='center', echo=FALSE, fig.height=3.4, out.width="100%", fig.show="hold"}
+# show histogram of hourly, daily, monthly data
+myhistogram(jena_climate_2009_2013h, jena_climate_2009_2013h$`T (degC)`, binwidth = 1, xLabel = "T (degC)") +
+  ggtitle("Distribution of the hourly \"T (degC)\" in the period 01.01.2009 00:00:00 - 31.01.2013 23:00:00")+
+  coord_cartesian(xlim = c(-20,30))
+myhistogram(jena_climate_2009_2013d, jena_climate_2009_2013d$`T (degC)`, binwidth = 2, xLabel = "T (degC)") +
+  ggtitle("Distribution of the daily \"T (degC)\" in the period 01.01.2009 - 31.01.2013") +
+  coord_cartesian(xlim = c(-20,30))
+myhistogram(jena_climate_2009_2013m, jena_climate_2009_2013m$`T (degC)`, binwidth = 3, xLabel = "T (degC)") +
+  ggtitle("Distribution of the monthly \"T (degC)\" in the period Jan. 2009 - Dec. 2013") +
+  coord_cartesian(xlim = c(-20,30))
+# --> calculating the mean has a huge influence on distribution, i.e. big difference to normal distribution 
+```
+
+It turns out, that calculating the mean has a huge influence on the distribution:
+By averaging over a longer period of time the distribution deviates more and more from normal distribution.
+Normality test methods like the 
+[Shapiro-Wilk test](https://en.wikipedia.org/wiki/Shapiro%E2%80%93Wilk_test)
+and the
+[Anderson-Darling test](https://en.wikipedia.org/wiki/Anderson%E2%80%93Darling_test)
+applied to the hourly, daily and monthly aggregated data also support this theses by returning higher *p-values* for increasing deviation:  
+<!-- -->
+```{r tableNormalityTest, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+normalityTestTb <- tibble('hourly data'  = "N/A", 
+                          'daily data'   = format(shapiro.test(jena_climate_2009_2013d$`T (degC)`)$p.value, digits = 3),
+                          'monthly data' = format(shapiro.test(jena_climate_2009_2013m$`T (degC)`)$p.value, digits = 3))
+normalityTestTb <- add_row(normalityTestTb,  'hourly data'  = format(ad.test(jena_climate_2009_2013h$`T (degC)`)$p.value, digits = 3),
+                                             'daily data'   = format(ad.test(jena_climate_2009_2013d$`T (degC)`)$p.value, digits = 3),
+                                             'monthly data' = format(ad.test(jena_climate_2009_2013m$`T (degC)`)$p.value, digits = 3))
+normalityTestTb <- add_column(normalityTestTb, 'Test on data' = c("Shapiro-Wilk normality test, p-value", "Anderson-Darling normality test, p-value"), .before = 1)
+kable(normalityTestTb) %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+rm(normalityTestTb)
+```
+<!-- -->
+Aggregating reduces the maximum values (spikes) like a filter, which is well shown by line plots of "T (degC)":
+
+```{r visualizeByLinePlotsHDM, fig.align='center', echo=FALSE, fig.height=4.2, out.width="100%", fig.show="hold"}
+# create time-series objects (ts) for the given data (hourly, daily, monthly):
+tsJenaTh <- ts(data = jena_climate_2009_2013h$`T (degC)`, start = c(2009,0), frequency = 24*365)
+tsJenaTd <- ts(data = jena_climate_2009_2013d$`T (degC)`, start = c(2009,0), frequency = 365)
+tsJenaTm <- ts(data = jena_climate_2009_2013m$`T (degC)`, start = c(2009,1), frequency = 12)
+tsJenaTh <- window(tsJenaTh, start=c(2009,0.001), end=c(2013,24*365-4)) # because of some reason there are 2008 and 2014-entries!!!
+tsJenaTd <- window(tsJenaTd, start=c(2009,0.001), end=c(2013,365)) # because of some reason there are 2008 and 2014-entries!!!
+
+# plot line charts of the 3 datasets:
+ggplot()+
+  geom_line(data = data.frame(date=time(tsJenaTh)        , TempC=as.matrix(tsJenaTh)), aes(x = date, y = TempC, color = "hourly")) +
+  geom_line(data = data.frame(date=time(tsJenaTd)+0.5/365, TempC=as.matrix(tsJenaTd)), aes(x = date, y = TempC, color = "daily")) + 
+  geom_line(data = data.frame(date=time(tsJenaTm)+0.5/12 , TempC=as.matrix(tsJenaTm)), aes(x = date, y = TempC, color = "monthly"), size=1) +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Values of \"T (degC)\" in the time period of 01.01.2009 00:00:00 to 01.01.2014 00:00:00 (excl.)") +
+  myggtheme +  
+  theme(legend.direction = "horizontal", legend.position = c(0.66, 0.06)) +
+  scale_color_manual(name = "Data aggregation (mean value)",
+                     breaks = c("hourly", "daily", "monthly"),
+                     values = c("hourly" = "darkgrey", "daily" = "blue", "monthly" = "black") ) +
+  scale_x_continuous()
+```
+
+The plot shows data of high seasonality with a yearly frequency, i.e. every 12 months the signal seems to repeat itself.
+Seasonal plots (see [function seasonplot()](https://rdrr.io/cran/forecast/man/seasonplot.html))
+are able to visualize this behaviour by plotting the data against the seasons (January to December) for separate years, see also [Hyndman (2014, chapter 2)](https://robjhyndman.com/uwafiles/fpp-notes.pdf):
+
+```{r seasonalPlotHDM, fig.align='center', echo=FALSE, fig.height=3.1, out.width="100%", fig.show="hold"}
+suppressMessages(ggseasonplot(tsJenaTh) + myggtheme +
+  ggtitle("Seasonal plot of hourly \"T (degC)\" for the years 2009 to 2013") +
+    scale_y_continuous(name="T (degC)", limits=c(-25, 35), breaks=c(-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35)) +
+    scale_x_continuous(name="Month",
+                       breaks = ((1:12)-0.5)/12,
+                       labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+
+suppressMessages(ggseasonplot(tsJenaTd) + myggtheme + 
+  ggtitle("Seasonal plot of daily \"T (degC)\" for the years 2009 to 2013") +
+    scale_y_continuous(name="T (degC)", limits=c(-25, 35), breaks=c(-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35)) +
+    scale_x_continuous(name="Month",
+                       breaks = ((1:12)-0.5)/12,
+                       labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+
+suppressMessages(ggseasonplot(tsJenaTm)+ myggtheme +
+  ggtitle("Seasonal plot of monthly \"T (degC)\" for the years 2009 to 2013") +
+    scale_y_continuous(name="T (degC)", limits=c(-25, 35), breaks=c(-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35)) +
+    scale_x_continuous(name="Month",
+                       breaks = ((1:12)-0.5)/13,
+                       labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+```
+
+To get a better impression, how much the value of "T (degC)" varies from year to year for each hour/day/month,
+so called "month plots" 
+(see [function monthplot()](https://www.rdocumentation.org/packages/stats/versions/3.6.0/topics/monthplot)) are created.
+For each hour/day/month of the five given years, the value is plotted side by side together with its average as blue line.  
+
+```{r monthPlotH, fig.align='center', echo=FALSE, fig.height=2.9, out.width="100%", fig.show="hold"}
+suppressMessages(ggmonthplot(tsJenaTh) + myggtheme +
+  ggtitle("\"Month\" (=hour) plot of hourly \"T (degC)\" for the years 2009 to 2013") +
+    scale_y_continuous(name="T (degC)", limits=c(-25, 35), breaks=c(-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35)) +
+    scale_x_continuous(name="Month",
+                     breaks = (0:11)*365*2 + 365,
+                     labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+```
+```{r monthPlotD, fig.align='center', echo=FALSE, fig.height=2.9, out.width="100%", fig.show="hold"}
+suppressMessages(ggmonthplot(tsJenaTd) + myggtheme +
+  ggtitle("\"Month\" (=day) plot of daily \"T (degC)\" for the years 2009 to 2013") +
+    scale_y_continuous(name="T (degC)", limits=c(-25, 35), breaks=c(-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35)) +
+    scale_x_continuous(name="Month",
+                       breaks = (0:11)*365/12 + 365*0.5/11,
+                       labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+```
+```{r monthPlotM, fig.align='center', echo=FALSE, fig.height=2.9, out.width="100%", fig.show="hold"}
+suppressMessages(ggmonthplot(tsJenaTm) + myggtheme +
+  ggtitle("Month plot of monthly \"T (degC)\" for the years 2009 to 2013") +
+    scale_y_continuous(name="T (degC)", limits=c(-25, 35), breaks=c(-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35)) +
+    scale_x_continuous(name="Month",
+                       breaks = (1:12)+0.5,
+                       labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+```
+
+The plots confirm data of high seasonality.
+This characteristic can be used for forecasting.
+Most forecasting methods depend on data without a trend present. 
+By decomposing the data regarding season and trend, the remainder does not show any obvious pattern:
+
+```{r decomposeH, fig.align='center', echo=FALSE, fig.height=4.4, out.width="100%", fig.show="hold", message=FALSE, warning=FALSE}
+suppressWarnings(autoplot(decompose(tsJenaTh, type = "additive")) + myggtheme + 
+                   ggtitle("Decompose plots of hourly \"T (degC)\" for the years 2009 to 2013") ) +
+                   xlab("Date")
+```
+
+```{r decomposeD, fig.align='center', echo=FALSE, fig.height=4.4, out.width="100%", fig.show="hold", message=FALSE, warning=FALSE}
+suppressWarnings(autoplot(decompose(tsJenaTd, type = "additive")) + myggtheme + 
+                   ggtitle("Decompose plots of daily \"T (degC)\" for the years 2009 to 2013") ) +
+                   xlab("Date")
+```
+
+```{r decomposeM, fig.align='center', echo=FALSE, fig.height=4.4, out.width="100%", fig.show="hold", message=FALSE, warning=FALSE}
+suppressWarnings(autoplot(decompose(tsJenaTm, type = "additive")) + myggtheme  + 
+                   ggtitle("Decompose plots of monthly \"T (degC)\" for the years 2009 to 2013") ) +
+                   xlab("Date")
+```
+
+The [Augmented Dickey–Fuller test](https://en.wikipedia.org/wiki/Augmented_Dickey%E2%80%93Fuller_test)
+delivers *p-values* smaller than 0.015, which is also an indication for stationary data, i.e. data without a trend. 
+According to 
+[Tavish Srivastava's Time Series Tutorial](https://www.analyticsvidhya.com/blog/2015/12/complete-tutorial-time-series-modeling/)
+stationary data must fulfill the following:
+
+1. The mean of the series should be constant over time.
+
+2. The variance of the series should be constant over time.
+
+3. The covariance of the series should be constant over time.
+
+
+**Summary of data analysis**
+
+By looking at the line plots of the data and its decomposition it can be summarized:  
+The data is of high seasonality, is stationary and shows no distinct trend.
+The remainder has no obvious pattern.
+
+
+
+
+\pagebreak
+
+# Modeling
+In this chapter training and test dataset will be defined.
+After introducing the methods to quantify the accuracy, several models for forecasting will be presented.
+ 
+## Train and Test Dataset
+In order to evaluate the quality of the forecast, the daily data of the 5-year period is split into two datasets:
+The time frame 01.01.2009-31.12.2012 will be used as training dataset.
+The values of the fifth year (2013) are sepcified as test dataset (holdout) and will be compared to the forecasted values. 
+The following line plot shows the two datasets:
+
+```{r linePlotTrainingTest, fig.align='center', echo=FALSE, fig.height=3.5, out.width="100%", fig.show="hold"}
+# Devide daily data into training and testing dataset: 80% for training (01.01.2009-31.12.2012), holdout of 20% for testing (01.01.2013-31.01.2013)
+# Whole years are selected
+tsJenaTd.train <- window(tsJenaTd, start=c(2009,1), end=c(2012,365))
+tsJenaTd.test  <- window(tsJenaTd, start=c(2013,1), end=c(2013,365))
+tsJenaTm.train <- window(tsJenaTm, start=c(2009,1), end=c(2012,12))
+tsJenaTm.test  <- window(tsJenaTm, start=c(2013,1), end=c(2013,12))
+
+# Plot train- and test-dataset:
+ggplot() +
+  forecast::autolayer(tsJenaTd.train, series = 'train data') +
+  forecast::autolayer(tsJenaTd.test , series = 'test data') +
+  xlab('Year') + ylab('daily mean of \"T (degC)\"') + 
+  guides(colour = guide_legend(title = 'Dataset', reverse=T)) +
+  myggtheme +
+  coord_cartesian(ylim = c(-25,40)) +
+  theme(legend.position = c(0.88, 0.14)) +
+  scale_color_manual(values=c("green", "black")) 
+```
+
+A first comparison of the two datasets shows very different distributions to each other.
+Both datasets deviate from normality distribution:
+
+```{r distributionTraining, fig.align='center', echo=FALSE, fig.height=3.4, out.width="100%", fig.show="hold"}
+# Plot histogram of train dataset "T (degC)" (daily data):
+tsJenaTd.train.df <- data.frame(TdegC = as.matrix(tsJenaTd.train), date = time(tsJenaTd.train))
+myhistogram(tsJenaTd.train.df, tsJenaTd.train.df$TdegC, binwidth = 2, xLabel = "T (degC)") +
+  ggtitle("Training dataset: Distribution of the daily \"T (degC)\" for the years 2009-2012") +
+  coord_cartesian(xlim = c(-20,30))
+# --> has some deviations to a normal distribution 
+```
+
+```{r distributionTest, fig.align='center', echo=FALSE, fig.height=3.4, out.width="100%", fig.show="hold"}
+# Plot histogram of test dataset "T (degC)" (daily data):
+tsJenaTd.test.df <- data.frame(TdegC = as.matrix(tsJenaTd.test), date = time(tsJenaTd.test))
+myhistogram(tsJenaTd.test.df, tsJenaTd.test.df$TdegC, binwidth = 2, xLabel = "T (degC)") +
+  ggtitle("Test dataset: Distribution of the daily \"T (degC)\" for the year 2013") +
+  coord_cartesian(xlim = c(-20,30))
+# --> does not look like a normal distribution and also quite different to the training dataset
+
+# introduce a table for collecting all accuracies of the models:
+accuracyTb.train <- tibble() # for collecting all accuracies of the models at the training dataset
+accuracyTb.test  <- tibble() # for collecting all accuracies of the models at the test dataset
+```
+
+
+## Quantification of Accuracy
+The R-function *accuracy()* is used to quantify the quality of the different models regarding fitting the *training* dataset and forecasting the *test* datatset.
+Following selection of methods is used for comparison:
+
+* **MAE: Mean Absolute Error** - mean of all differences between actual and forecasted absolute values, see
+[Wikipedia-MAE](https://en.wikipedia.org/wiki/Mean_absolute_error)
+
+* **RMSE: Root Mean Squared Error** - the sample standard deviation of differences between actual and forecasted values, see
+[Wikipedia-RMSE](https://en.wikipedia.org/wiki/Root-mean-square_deviation)
+
+* **MASE: Mean Absolute Scaled Error** - measures the mean absolute error of the forecast values, divided by the mean absolute error of the *naive* forecast.
+[Wikipedia-MASE](https://en.wikipedia.org/wiki/Mean_absolute_scaled_error)
+
+* **MAPE: Mean Absolute Percentage Error** - measures the difference of forecast errors and divides it by the actual value, see
+[Wikipedia-MAPE](https://en.wikipedia.org/wiki/Mean_absolute_percentage_error)
+
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 1: Naive Method
+```{r m1Forecast, echo=FALSE}
+tsJenaTd.fc_naive  <-  naive(tsJenaTd.train, h=365)
+```
+The naive model projects the last observation into the future.
+So all forecasts are constant and equal to the last observed value.
+Here in this case the predicted constant value for the year 2013 is `r tsJenaTd.fc_naive$mean[1]`.
+
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m1PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+autoplot(tsJenaTd.fc_naive) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 1: Naive method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m1TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_naive , tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_naive , tsJenaTd.test)[1,])), Model="M1 naive"         , .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_naive , tsJenaTd.test)[2,])), Model="M1 naive"         , .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m1PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_naive$residuals )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 1: naive method"  , "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+The residuals tell a lot about the quality of the model.
+They are what is left after the fitted values (here it is only one constant value) got subtracted from the original dataset.
+Only randomness should stay in the residuals. Everything else should be included in the model.
+Therefore the residuals should have a mean of zero, constant variance and ideally they are normally distributed. 
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 2: Seasonal Naive Method
+Each forecast is equal to the last value from the same season.
+In this case here the forecast values for 2013 are just the same values as from the year 2012.
+Same day, same month, just the year is replaced.
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m2PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+tsJenaTd.fc_snaive <- snaive(tsJenaTd.train, h=365)
+autoplot(tsJenaTd.fc_snaive) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 2: Seasonal naive method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m2TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_snaive, tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_snaive, tsJenaTd.test)[1,])), Model="M2 seasonal naive", .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_snaive, tsJenaTd.test)[2,])), Model="M2 seasonal naive", .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m2PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_snaive$residuals)))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 2: seasonal naive method" , "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 3: Average Method
+```{r m3Forecast, echo=FALSE}
+tsJenaTd.fc_meanf <- meanf(tsJenaTd.train, h=365)
+```
+The average model calculates the mean of the given historical data.
+All forecasts are constant and equal to this mean value.
+Here in this case it turns out, that the calculated average value is `r tsJenaTd.fc_meanf$mean[1]`, 
+which is very similar to the last observation used for the naive model (`r tsJenaTd.fc_naive$mean[1]`).
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m3PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+autoplot(tsJenaTd.fc_meanf) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 3: Average method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m3TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_meanf , tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_meanf , tsJenaTd.test)[1,])), Model="M3 average"       , .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_meanf , tsJenaTd.test)[2,])), Model="M3 average"       , .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m3PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_meanf$residuals )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 3: average method", "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 4: Drift Method
+The drift method is best described as a forecast equal to last value plus average change.
+It calculates the difference between first and last observation and extrapolates that gradient into the future.
+Here the slope is small as there is no obvious trend present.
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m4PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+tsJenaTd.fc_drift <- rwf(tsJenaTd.train, h=365, drift=T)
+autoplot(tsJenaTd.fc_drift) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 4: Drift method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m4TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_drift , tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_drift , tsJenaTd.test)[1,])), Model="M4 drift"         , .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_drift , tsJenaTd.test)[2,])), Model="M4 drift"         , .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m4PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_drift$residuals )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 4: drift method"  , "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 5: Seasonal Decomposition + Naive Method
+Seasonal decomposition means separating a seasonal time series into its constituent components, which are a seasonal component, a trend component and a random component.
+The acronym *STL* is related to this method, i.e. decompose a time series into seasonal, trend and irregular components using loess.
+
+Forecasts of STL objects are obtained by applying a non-seasonal forecasting method to the seasonally adjusted data and re-seasonalizing using the last year of the seasonal component.
+Here the naive method is applied.
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m5PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+tsJenaTd.fc_stl_naive   <- stlf(tsJenaTd.train, h=365, method = "naive")
+autoplot(tsJenaTd.fc_stl_naive  ) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 5: STL + naive method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m5TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_stl_naive  , tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_stl_naive  , tsJenaTd.test)[1,])), Model="M5 STL + naive", .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_stl_naive  , tsJenaTd.test)[2,])), Model="M5 STL + naive", .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m5PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_stl_naive$residuals  )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 5: stl + naive method", "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 6: Seasonal Decomposition + Drift Method
+This model uses the STL method like described before and applies the drift method to obtain a forecast.
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m6PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+tsJenaTd.fc_stl_rwdrift <- stlf(tsJenaTd.train, h=365, method = "rwdrift")
+autoplot(tsJenaTd.fc_stl_rwdrift) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 6: STL + drift method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m6TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_stl_rwdrift, tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_stl_rwdrift, tsJenaTd.test)[1,])), Model="M6 STL + drift", .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_stl_rwdrift, tsJenaTd.test)[2,])), Model="M6 STL + drift", .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m6PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_stl_rwdrift$residuals)))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 6: stl + drift method", "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+As there is no distinct drift present, the resulting values of this model look quite similar to
+the values obtained by the *seasonal decomposition + naive model*.  
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 7: Seasonal Decomposition + ARIMA Method
+This model uses the STL method and applies the ARIMA method to obtain a forecast.
+The ARIMA model is described later as a separate method.
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m7PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+tsJenaTd.fc_stl_arima   <- stlf(tsJenaTd.train, h=365, method = "arima")
+autoplot(tsJenaTd.fc_stl_arima  ) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 7: STL + ARIMA method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m7TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_stl_arima  , tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_stl_arima  , tsJenaTd.test)[1,])), Model="M7 STL + ARIMA", .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_stl_arima  , tsJenaTd.test)[2,])), Model="M7 STL + ARIMA", .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m7PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_stl_arima$residuals  )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 7: stl + ARIMA method", "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+The residuals are very close to a normal distribution.
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 8: Seasonal ARIMA Method
+The [Autoregressive Integrated Moving Average (ARIMA) model](https://en.wikipedia.org/wiki/Autoregressive_integrated_moving_average)
+for univariate time series combines three parts
+with the integers ($p$,$d$,$q$) denoting the grade of order of the three parts:
+
+* **AR** - autoregressive part ($p$)
+
+* **I** - integration, i.e. degree of differencing ($d$)
+
+* **MA** - moving average part ($q$)
+
+For non-stationary time series differencing is applied $d$-times to obtain a stationary signal.
+This stationary signal is then represented by the *ARMA*-model.
+To obtain the values for the original non-stationary signal again, integration is performed on the results of the *ARMA*-model.
+The *ARMA*-model is defined as:
+$$y_t = c + \epsilon_t + \sum_{i=1}^p a_i y_{t-i} + \sum_{j=1}^q b_j \epsilon_{t-j}$$
+The signal $y_t$ is build by a weighted moving average of random values $\epsilon_{t-j}$, $j=1,...,q$ of the $q$ previous periods. 
+The so-called **MA**-coefficients $b_j, j=1,...,q$ determine with which weight the random values contribute to the signal.
+Furthermore the signal is composed of a constant $c$, a random value $\epsilon_t$ and
+a weighted moving average of the previous $p$ signal values $y_{t-i}$,
+where the **AR**-coefficients $a_i, i=1,...,p$ are the weights.
+Regarding the random values $\epsilon_t$,
+it is assumed that they are time independent of each other and are normally distributed.
+
+The goal is to determine the three describing parameters ($p$,$d$,$q$) of the *ARIMA*-model such that
+the *AIC*-value is as small as possible.
+The [*Akaike Information Criterion (AIC)*](https://en.wikipedia.org/wiki/Akaike_information_criterion)
+is a widely used measure to quantify the fitting quality together with the simplicity of the model.
+The R-function *[auto.arima()](https://www.rdocumentation.org/packages/forecast/versions/8.7/topics/auto.arima)*
+uses the *AIC*-value to automatically determine the "best" parameters ($p$,$d$,$q$) for a given dataset.
+
+For the training dataset the 
+[autocorrelation function](https://en.wikipedia.org/wiki/Autocorrelation) 
+(*ACF*) and the 
+[partial autocorrelation function](https://en.wikipedia.org/wiki/Partial_autocorrelation_function)
+(*PACF*) show several bars ranging out of the 95% confidence intervals (blue lines).
+
+```{r m8ggtsdisplay, fig.align='center', echo=FALSE, fig.height=3.5, out.width="100%", fig.show="hold"}
+ggtsdisplay(tsJenaTd.train, lag.max = 36, theme = theme_bw())
+```
+
+There is a good chance that an *ARIMA*-model is able to reconstruct and forecast the signal with high accuracy, as...
+
+* *ACF* is used to identify the moving average (MA) part of the ARIMA model (omit first bar)
+
+* *PACF* is used to identify the autoregressive part (AR)
+
+
+\pagebreak 
+
+The prediction provided by the ARIMA model for the year 2013 is shown as blue line: 
+
+```{r m8PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold", results = 'hide', message=FALSE, warning=FALSE}
+# model 8: seasonal ARIMA. explaination e.g.: https://otexts.com/fpp2/seasonal-arima.html
+tsJenaTd.mo_auto.arima1 <- auto.arima(tsJenaTd.train, trace = T, seasonal = T) # ARIMA(5,0,0)(0,1,0)[365]
+# better results with: approximation = F & stepwise = F , but very time-consuming!!!
+
+tsJenaTd.fc_auto.arima1 <- forecast(tsJenaTd.mo_auto.arima1, h=365)
+
+autoplot(tsJenaTd.fc_auto.arima1) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 8: seasonal ARIMA method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m8TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracies of forecast model:
+accuracy(tsJenaTd.fc_auto.arima1, tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_auto.arima1, tsJenaTd.test)[1,])), Model="M8 seasonal ARIMA", .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_auto.arima1, tsJenaTd.test)[2,])), Model="M8 seasonal ARIMA", .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m8PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_auto.arima1$residuals  )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 8: seasonal ARIMA method", "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+The residual distribution shows a huge peak for the zero bin. 
+This might be an indication for overfitting the given data.
+At least the goal of obtaining a normal distribution is not achieved here. 
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+## Model 9: Neural Net Method 
+A [neural network](https://en.wikipedia.org/wiki/Artificial_neural_network)
+simplifies input variables over one or several layers into one output value.
+In this case a *Neural Network Autoregression Model* is used with $p$ lagged values as input and
+$k$ nodes in the hidden layer.
+The R function [nnetar](https://www.rdocumentation.org/packages/forecast/versions/8.7/topics/nnetar)
+determines automatically the parameters $p$ and $k$.
+
+
+The prediction provided by this model for the year 2013 is shown as blue line: 
+
+```{r m9PlotForecast, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold", results = 'hide', message=FALSE, warning=FALSE}
+# model 9: Neural Net method, NNAR(p,P,k)  P=1 1-seasonal-lag (9,1,5)
+tsJenaTd.mo_nnetar <- nnetar(tsJenaTd.train)
+
+tsJenaTd.mo_nnetar # NNAR(5,1,4)[365] : 6-4-1 network with 33 weights - linear output units 
+
+tsJenaTd.fc_nnetar <- forecast(tsJenaTd.mo_nnetar, h=365, PI=T)
+
+autoplot(tsJenaTd.fc_nnetar) + myggtheme +
+  xlab("Date") +
+  ylab("T (degC)") +
+  ggtitle("Model 9: Neural Net method, forecast of \"T (degC)\"") +
+  coord_cartesian(ylim = c(-25,40))
+```
+
+With this model the following accuracies on training and test dataset can be achieved: 
+
+```{r m9TableAccuracy, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# show accuracy of forecast model:
+accuracy(tsJenaTd.fc_nnetar, tsJenaTd.test) %>%
+  kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+
+# gather accuracies of forecast models:
+accuracyTb.train <- bind_rows(accuracyTb.train, add_column(as_tibble(t(accuracy(tsJenaTd.fc_nnetar, tsJenaTd.test)[1,])), Model="M9 Neural Net", .before = 1))
+accuracyTb.test  <- bind_rows(accuracyTb.test , add_column(as_tibble(t(accuracy(tsJenaTd.fc_nnetar, tsJenaTd.test)[2,])), Model="M9 Neural Net", .before = 1))
+```
+
+The residual distribution of this model is shown by a histogram:
+
+```{r m9PlotResiduals, fig.align='center', echo=FALSE, fig.height=2.8, out.width="100%", fig.show="hold"}
+# Plot residuals
+res.df <- na.omit(data.frame(res = as.matrix(tsJenaTd.fc_nnetar$residuals  )))
+myhistogram(res.df, res.df$res, 1, "Residuals of model 9: Neural Net method", "Residuals") + coord_cartesian(xlim = c(-25,20))
+```
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+\pagebreak 
+
+# Results
+
+Following table summarises the achieved accuracy values for fitting the training data:
+
+```{r tableAccuracyTraining, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# define scale function for better visualisation
+scale01 <- function(x){((x-min(x))/(max(x)-min(x))*0.88*10 + 0.12*10)*1}
+
+# take a look on the accuracy overview (train dataset):
+accuracyTb.train %>% select(Model,RMSE,MAE,MAPE,MASE) %>% kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+```
+
+Visualization of accuracy as *Scaled Error* value for training dataset:
+
+```{r plotAccuracyTraining, fig.align='center', echo=FALSE, fig.height=3.5, out.width="100%", fig.show="hold"}
+# scale the train dataset errors and unpivot the table for plotting purpose:
+df.accuracyTb01.train <- cbind(select(accuracyTb.train, Model),
+                        lapply(select(accuracyTb.train, RMSE,MAE,MAPE,MASE), scale01) ) %>% 
+  melt(id = c("Model")) %>% rename(Error = variable)
+
+# plot Errors overview for train dataset:
+ggplot(data=df.accuracyTb01.train, aes(x=reorder(Model, desc(Model)), y=value, fill=Error)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  scale_y_continuous(trans = 'log10', breaks = c((1:10)), labels = c("small","","","","","","","","","big")) +
+  xlab("") +
+  ylab("Scaled Error Value") +
+  coord_flip() +
+  ggtitle("Scaled Error value for training dataset: Which model achieves the lowest Error") +
+  myggtheme +
+  theme(panel.grid.minor = element_blank())
+```
+
+Model *M7*, the *Seasonal Decomposition + ARIMA Method* shows the best accuracy for fitting the training data.
+
+
+\pagebreak 
+
+Following table summarises the achieved accuracy values for forecasting the test data:
+
+```{r tableAccuracyTest, fig.align='center', echo=FALSE, out.width="100%", fig.show="hold"}
+# take a look on the accuracy overview (test dataset):
+accuracyTb.test  %>% select(Model,RMSE,MAE,MAPE,MASE) %>% kable() %>% kable_styling(bootstrap_options = "striped", latex_options = "striped", full_width = FALSE, position = "center")
+```
+
+Visualization of accuracy as *Scaled Error* value for test dataset:
+
+```{r plotAccuracyTest, fig.align='center', echo=FALSE, fig.height=3.5, out.width="100%", fig.show="hold"}
+# scale the test dataset errors and unpivot the table for plotting purpose:
+df.accuracyTb01.test <- cbind(select(accuracyTb.test, Model),
+                       lapply(select(accuracyTb.test, RMSE,MAE,MAPE,MASE), scale01) ) %>% 
+  melt(id = c("Model")) %>% rename(Error = variable)
+
+# plot Errors overview for test dataset:
+ggplot(data=df.accuracyTb01.test, aes(x=reorder(Model, desc(Model)), y=value, fill=Error)) +
+  #ggplot(data=df.accuracyTb01.test, aes(x=Error, y=value, fill=Model)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  #  scale_y_log10(limits = c(0.1,100)) +
+  scale_y_continuous(trans = 'log10', breaks = c((1:10)), labels = c("small","","","","","","","","","big")) +
+  xlab("") +
+  ylab("Scaled Error Value") +
+  coord_flip() +
+  ggtitle("Scaled Error value for test dataset: Which model achieves the lowest Error") +
+  myggtheme +
+  theme(panel.grid.minor = element_blank())
+```
+
+Model *M9*, the *Neural Net Method* provides the best accuracy regarding forecasting the test data.
+Also the seasonal methods *M2 - Seasonal Naive Method* and *M8 - Seasonal ARIMA Method*
+do a quite good job.
+The three models were not the favorites when looking on the accuracy for fitting the training dataset. 
+
+The following plots visualize the fitted and forecasted values of the models M7, M9 and M8: 
+
+```{r plotForecastTestM7, fig.align='center', echo=FALSE, fig.height=3.1, out.width="100%", fig.show="hold", message=FALSE, warning=FALSE}
+# plot forecast vs. test data for M7
+ggplot() +
+  forecast::autolayer(tsJenaTd.train, series = 'train data', size = 1) +
+  forecast::autolayer(tsJenaTd.test , series = 'test data' , size = 1) +
+  forecast::autolayer(tsJenaTd.fc_stl_arima$fitted, series = 'M7 fitted', size = 0.5) +
+  forecast::autolayer(tsJenaTd.fc_stl_arima$mean  , series = 'M7 forecast', size = 0.5) +
+  xlab('Year') + ylab('daily mean of \"T (degC)\"') + 
+  guides(colour = guide_legend(title = 'Dataset', reverse=F)) +
+  myggtheme +
+  coord_cartesian(ylim = c(-25,40)) +
+  #theme(legend.position = c(0.85, 0.13)) +
+  #theme(legend.direction = "horizontal", legend.position = c(0.35, 0.067)) +
+  theme(legend.direction = "horizontal", legend.position = c(0.35, 0.9)) +
+  scale_color_manual(values=c("cyan", "blue", "green","black"),
+                     breaks=c("train data", "test data", "M7 fitted", "M7 forecast"))
+```
+
+
+```{r plotForecastTestM9, fig.align='center', echo=FALSE, fig.height=3.1, out.width="100%", fig.show="hold", message=FALSE, warning=FALSE}
+# plot forecast vs. test data for M9
+ggplot() +
+  forecast::autolayer(tsJenaTd.train, series = 'train data', size = 1) +
+  forecast::autolayer(tsJenaTd.test , series = 'test data' , size = 1) +
+  forecast::autolayer(tsJenaTd.fc_nnetar$fitted, series = 'M9 fitted'  , size = 0.5) +
+  forecast::autolayer(tsJenaTd.fc_nnetar$mean  , series = 'M9 forecast', size = 0.5) +
+  xlab('Year') + ylab('daily mean of \"T (degC)\"') + 
+  guides(colour = guide_legend(title = 'Dataset', reverse=F)) +
+  myggtheme +
+  coord_cartesian(ylim = c(-25,40)) +
+  #theme(legend.position = c(0.85, 0.13)) +
+  theme(legend.direction = "horizontal", legend.position = c(0.35, 0.9)) +
+  scale_color_manual(values=c("cyan", "blue", "green","black"),
+                     breaks=c("train data", "test data", "M9 fitted", "M9 forecast"))
+```
+
+
+```{r plotForecastTestM8, fig.align='center', echo=FALSE, fig.height=3.1, out.width="100%", fig.show="hold", message=FALSE, warning=FALSE}
+# plot forecast vs. test data for M8
+ggplot() +
+  forecast::autolayer(tsJenaTd.train, series = 'train data', size = 1) +
+  forecast::autolayer(tsJenaTd.test , series = 'test data' , size = 1) +
+  forecast::autolayer(tsJenaTd.fc_auto.arima1$fitted, series = 'M8 fitted'  , size = 0.5) +
+  forecast::autolayer(tsJenaTd.fc_auto.arima1$mean  , series = 'M8 forecast', size = 0.5) +
+  xlab('Year') + ylab('daily mean of \"T (degC)\"') + 
+  guides(colour = guide_legend(title = 'Dataset', reverse=F)) +
+  myggtheme +
+  coord_cartesian(ylim = c(-25,40)) +
+  #theme(legend.position = c(0.85, 0.13)) +
+  theme(legend.direction = "horizontal", legend.position = c(0.35, 0.9)) +
+  scale_color_manual(values=c("cyan", "blue", "green","black"),
+                     breaks=c("train data", "test data", "M8 fitted", "M8 forecast"))
+```
+
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+
+\pagebreak 
+
+# Conclusion
+
+In this project machine learning algorithms were used to forecast the daily mean temperatures of one year by fitting the models to the available data of the previous four years.
+The quality of this task was quantified by a selection of accuracy measurements like RMSE, MAE, MASE and MAPE.
+
+A variety of models were used:
+Some of the simple ones like naive-, average- or drift-methods already achieve good accuracy.
+This might be because a large part of the signal (=temperatures) is noise, which usually cannot be forecasted well by sophisticated models.
+It is also obvious that the signal shows high seasonality.
+Therefore models based on seasonal decomposition (STL) show quite good performance.
+Another standard tool is the ARIMA-model.
+In the simple form, like it was used here, it tended to *overfitt* the training data.
+So the forecast accurcacy was dissapointing. 
+The neural net model on the other hand fitted the training data with fair quality and showed best forecast accuracy. 
+
+It is likely that much more sophisticated methods would achieve better accuracy.
+So far this project was just a first survey of a selection of methods without any detailed investigation or optimization of each used model. 
+Furthermore the validation by dividing the data into one training and one test dataset could be improved.
+For example an approach like cross-validation could help to avoid overfitting.
+For simplicity reasons it was not applied so far.
+The implementation is left to future work.
+
+
+<!-- --------------------------------------------------------------------------------------------- -->
+<!-- \pagebreak --> 
+
+# Appendix - Sessioninfo
+```{r , echo=FALSE, size = 'tiny'}
+sessionInfo()
+```
