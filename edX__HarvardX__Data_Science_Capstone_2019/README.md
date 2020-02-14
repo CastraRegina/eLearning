@@ -23,19 +23,19 @@ A [10M version of the MovieLens data set](http://grouplens.org/datasets/movielen
 The goal is to train a machine learning algorithm that uses the inputs in one subset to predict movie ratings in the validation set.
 For a final test of the algorithm, movie ratings in the validation set have to be predicted as if they were unknown.
 RMSE will be used to evaluate how close the predictions are to the true values in the validation set.
-A target value of **RMSE <= 0.87750** is given.
+A target value of *RMSE <= 0.87750* is given.
 
 Starting with a base model which utilizes just an average rating as a constant value, four different models that take into account movie and/or user effects are used to predict the ratings.
 Two of the presented models fulfill the required target value.
-The final model reaches a **RMSE** value of approximately **0.8648**.
+The final model reaches a *RMSE* value of approximately *0.8648*.
 
 
 - **movielens-project-r-script.R**
-  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-r-script.R)]
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-r-script.R)]\
   R file    
 
-- **movielens-project-r-script.Rmd**
-  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-report.Rmd)]
+- **movielens-project-report.Rmd**
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/movielens-project-report.Rmd)]\
   Rmd - R Markdown file    
 
 - **movielens-project-report.pdf**
@@ -61,11 +61,11 @@ the temperatures.
 
 
 - **CYO-project-r-script.R**
-  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-r-script.R)]
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-r-script.R)]\
   R file    
 
-- **CYO-project-r-script.Rmd**
-  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-report.Rmd)]
+- **CYO-project-report.Rmd**
+  [[code](https://github.com/CastraRegina/eLearning/blob/master/edX__HarvardX__Data_Science_Capstone_2019/CYO-project-report.Rmd)]\
   Rmd - R Markdown file    
 
 - **CYO-project-report.pdf**
